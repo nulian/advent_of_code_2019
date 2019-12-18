@@ -89,32 +89,9 @@ defmodule IntOpEngine do
     {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
   end
 
-  # Input
-  #  def parse_list(
-  #        [3, address | rest],
-  #        %{input_list: [input | other_inputs]} = lookup_map,
-  #        index,
-  #        _flags
-  #      ) do
-  #    {updated_map, rest, new_index} = update_value(lookup_map, rest, index + 2, address, input)
-  #    parse_list(rest, Map.put(updated_map, :input_list, other_inputs), new_index)
-  #  end
-  #
-  #  def parse_list(
-  #        [3, address | rest],
-  #        %{input_list: _, output_list: head} = lookup_map,
-  #        index,
-  #        _flags
-  #      ) do
-  #    {updated_map, rest, new_index} = update_value(lookup_map, rest, index + 2, address, head)
-  #    parse_list(rest, Map.put(updated_map, :input_list, head), new_index)
-  #  end
-
   defp parse_list(%{command_list: [3, _address | _rest]} = state) do
     Logger.info("Waiting for inputt:")
     {:noreply, %{state | input_request: true}, :hibernate}
-    #    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 2, address, input)
-    #    parse_list(rest, updated_map, new_index)
   end
 
   # Puts
