@@ -21,6 +21,10 @@ defmodule IntOpEngine do
     def new(arguments) do
       Map.merge(%State{argument_flags: %Flags{}}, arguments)
     end
+
+    def reset_flags(%State{} = state) do
+      %{state | argument_flags: %Flags{}}
+    end
   end
 
   def get_data_list(filename) do
@@ -44,7 +48,27 @@ defmodule IntOpEngine do
 
   @impl true
   def handle_info(:timeout, state) do
-    parse_list(state)
+    parse_list(State.reset_flags(state))
+  end
+
+  @impl true
+  def handle_cast({:set_input, input}, %{command_list: [3, address | rest], input_request: true} = state) do
+    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 2, address, input)
+
+    updated_state = %{
+      state
+      | command_list: rest,
+        lookup_map: updated_map,
+        current_index: new_index,
+        input_request: false
+    }
+
+    {:noreply, updated_state, 0}
+  end
+
+  def handle_case({:set_input, _}, state) do
+    Logger.warn("Invalid time for input.")
+    {:noreply, state}
   end
 
   defp parse_list(%{command_list: [1, a, b, value | rest]} = state) do
