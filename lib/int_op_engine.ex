@@ -1,7 +1,7 @@
 defmodule IntOpEngine do
   @moduledoc false
 
-  use GenServer
+  use GenServer, restart: :temporary
 
   require Logger
 
