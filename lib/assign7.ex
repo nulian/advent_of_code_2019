@@ -20,15 +20,20 @@ defmodule Assign7 do
   end
 
   def assignment() do
-    Pipeline.start_link(command_list: list()) |> IO.inspect()
-
     Enum.reduce(permutations([5, 6, 7, 8, 9]), [], fn [a, b, c, d, e] = config, acc ->
-      {:ok, pid5} = Pipeline.start_child(input_list: [e], result_pid: self())
-      {:ok, pid4} = Pipeline.start_child(input_list: [d], output_pid: pid5)
-      {:ok, pid3} = Pipeline.start_child(input_list: [c], output_pid: pid4)
-      {:ok, pid2} = Pipeline.start_child(input_list: [b], output_pid: pid3)
-      {:ok, pid1} = Pipeline.start_child(input_list: [a, 0], output_pid: pid2)
+      IO.inspect(config, label: "config")
+      {:ok, super_pid} = Pipeline.start_link(command_list: list()) |> IO.inspect()
+      {:ok, pid5} = Pipeline.start_child(result_pid: self())
+      {:ok, pid4} = Pipeline.start_child(output_pid: pid5)
+      {:ok, pid3} = Pipeline.start_child(output_pid: pid4)
+      {:ok, pid2} = Pipeline.start_child(output_pid: pid3)
+      {:ok, pid1} = Pipeline.start_child(output_pid: pid2)
 
+      GenServer.cast(pid5, {:set_input, e})
+      GenServer.cast(pid4, {:set_input, d})
+      GenServer.cast(pid3, {:set_input, c})
+      GenServer.cast(pid2, {:set_input, b})
+      GenServer.cast(pid1, {:set_input, a})
       :ok = GenServer.call(pid5, {:set_output_pid, pid1})
 
       Pipeline
@@ -39,11 +44,14 @@ defmodule Assign7 do
         :ok = GenServer.call(pid, :start_run)
       end)
 
+      GenServer.cast(pid1, {:set_input, 0})
+
       value =
         receive do
           {:result, value} -> value
         end
 
+      DynamicSupervisor.stop(super_pid)
       [{config, value} | acc]
     end)
 
