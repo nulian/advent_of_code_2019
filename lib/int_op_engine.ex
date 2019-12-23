@@ -18,7 +18,8 @@ defmodule IntOpEngine do
               input_list: [],
               last_output: nil,
               output_pid: nil,
-              result_pid: nil
+              result_pid: nil,
+              relative_base: 0
 
     def new(arguments) do
       Map.merge(%State{argument_flags: %Flags{}}, arguments)
@@ -73,7 +74,9 @@ defmodule IntOpEngine do
 
   @impl true
   def handle_cast({:set_input, input}, %{command_list: [3, address | rest], input_request: true} = state) do
-    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 2, address, input)
+    state = %{state | current_index: state.current_index + 2}
+
+    {updated_map, rest, new_index} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
 
     updated_state = %{
       state
@@ -96,7 +99,9 @@ defmodule IntOpEngine do
     val_a = value_lookup(state.lookup_map, a, state.argument_flags.param_1_mode)
     val_b = value_lookup(state.lookup_map, b, state.argument_flags.param_2_mode)
 
-    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 4, value, val_a + val_b)
+    state = %{state | current_index: state.current_index + 4}
+
+    {updated_map, rest, new_index} = update_value(state, rest, value, val_a + val_b, state.argument_flags.param_3_mode)
 
     {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
   end
@@ -105,14 +110,19 @@ defmodule IntOpEngine do
     val_a = value_lookup(state.lookup_map, a, state.argument_flags.param_1_mode)
     val_b = value_lookup(state.lookup_map, b, state.argument_flags.param_2_mode)
 
-    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 4, value, val_a * val_b)
+    state = %{state | current_index: state.current_index + 4}
+
+    {updated_map, rest, new_index} = update_value(state, rest, value, val_a * val_b, state.argument_flags.param_3_mode)
 
     {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
   end
 
   defp parse_list(%{command_list: [3, address | rest], input_list: [input | remaining_input]} = state) do
     Logger.info("used preset input")
-    {updated_map, rest, new_index} = update_value(state.lookup_map, rest, state.current_index + 2, address, input)
+
+    state = %{state | current_index: state.current_index + 2}
+
+    {updated_map, rest, new_index} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
 
     updated_state = %{
       state
@@ -164,7 +174,7 @@ defmodule IntOpEngine do
     end
   end
 
-  defp parse_list(%{command_list: [key, x, y, value | rest]} = state) when key in [7, 8] do
+  defp parse_list(%{command_list: [key, x, y, set_value | rest]} = state) when key in [7, 8] do
     val_x = value_lookup(state.lookup_map, x, state.argument_flags.param_1_mode)
     val_y = value_lookup(state.lookup_map, y, state.argument_flags.param_2_mode)
 
@@ -174,8 +184,10 @@ defmodule IntOpEngine do
         {_x, _y} -> 0
       end
 
+    state = %{state | current_index: state.current_index + 4}
+
     {updated_map, rest, new_index} =
-      update_value(state.lookup_map, rest, state.current_index + 4, value, comparison_value)
+      update_value(state, rest, set_value, comparison_value, state.argument_flags.param_3_mode)
 
     {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
   end
@@ -218,18 +230,33 @@ defmodule IntOpEngine do
     })
   end
 
-  defp update_value(lookup_map, rest_list, index, key, value) do
-    updated_map = Map.put(lookup_map, key, value)
-    rest_index = key - index
+  defp update_value(%State{} = state, rest_list, key, value, 0) do
+    updated_map = Map.put(state.lookup_map, key, value)
+    rest_index = key - state.current_index
 
     rest_list =
       if rest_index >= 0 do
-        List.replace_at(rest_list, key - index, value)
+        List.replace_at(rest_list, rest_index, value)
       else
         rest_list
       end
 
-    {updated_map, rest_list, index}
+    {updated_map, rest_list, state.current_index}
+  end
+
+  defp update_value(%State{} = state, rest_list, relative_key_value, value, 2) do
+    relative_key = state.relative_base + relative_key_value
+    updated_map = Map.put(state.lookup_map, relative_key, value)
+    rest_index = relative_key - state.current_index
+
+    rest_list =
+      if rest_index >= 0 do
+        List.replace_at(rest_list, rest_index, value)
+      else
+        rest_list
+      end
+
+    {updated_map, rest_list, state.current_index}
   end
 
   defp value_lookup(map, key, 0) do
