@@ -96,8 +96,8 @@ defmodule IntOpEngine do
   end
 
   defp parse_list(%{command_list: [1, a, b, value | rest]} = state) do
-    val_a = value_lookup(state.lookup_map, a, state.argument_flags.param_1_mode)
-    val_b = value_lookup(state.lookup_map, b, state.argument_flags.param_2_mode)
+    val_a = value_lookup(state, a, state.argument_flags.param_1_mode)
+    val_b = value_lookup(state, b, state.argument_flags.param_2_mode)
 
     state = %{state | current_index: state.current_index + 4}
 
@@ -107,8 +107,8 @@ defmodule IntOpEngine do
   end
 
   defp parse_list(%{command_list: [2, a, b, value | rest]} = state) do
-    val_a = value_lookup(state.lookup_map, a, state.argument_flags.param_1_mode)
-    val_b = value_lookup(state.lookup_map, b, state.argument_flags.param_2_mode)
+    val_a = value_lookup(state, a, state.argument_flags.param_1_mode)
+    val_b = value_lookup(state, b, state.argument_flags.param_2_mode)
 
     state = %{state | current_index: state.current_index + 4}
 
@@ -142,21 +142,21 @@ defmodule IntOpEngine do
 
   # Puts
   defp parse_list(%{command_list: [4, address | rest], output_pid: output_pid} = state) when is_pid(output_pid) do
-    value = value_lookup(state.lookup_map, address, state.argument_flags.param_1_mode)
+    value = value_lookup(state, address, state.argument_flags.param_1_mode)
     Logger.info(value)
     GenServer.cast(output_pid, {:set_input, value})
     {:noreply, %{state | command_list: rest, last_output: value, current_index: state.current_index + 2}, 0}
   end
 
   defp parse_list(%{command_list: [4, address | rest]} = state) do
-    value = value_lookup(state.lookup_map, address, state.argument_flags.param_1_mode)
+    value = value_lookup(state, address, state.argument_flags.param_1_mode)
     Logger.info(value)
     {:noreply, %{state | command_list: rest, last_output: value, current_index: state.current_index + 2}, 0}
   end
 
   defp parse_list(%{command_list: [key, x, value | rest]} = state) when key in [5, 6] do
-    val_x = value_lookup(state.lookup_map, x, state.argument_flags.param_1_mode)
-    new_index = value_lookup(state.lookup_map, value, state.argument_flags.param_2_mode)
+    val_x = value_lookup(state, x, state.argument_flags.param_1_mode)
+    new_index = value_lookup(state, value, state.argument_flags.param_2_mode)
 
     case val_x do
       x when (key == 5 and x == 0) or (key == 6 and x != 0) ->
@@ -175,8 +175,8 @@ defmodule IntOpEngine do
   end
 
   defp parse_list(%{command_list: [key, x, y, set_value | rest]} = state) when key in [7, 8] do
-    val_x = value_lookup(state.lookup_map, x, state.argument_flags.param_1_mode)
-    val_y = value_lookup(state.lookup_map, y, state.argument_flags.param_2_mode)
+    val_x = value_lookup(state, x, state.argument_flags.param_1_mode)
+    val_y = value_lookup(state, y, state.argument_flags.param_2_mode)
 
     comparison_value =
       case {val_x, val_y} do
@@ -190,6 +190,12 @@ defmodule IntOpEngine do
       update_value(state, rest, set_value, comparison_value, state.argument_flags.param_3_mode)
 
     {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
+  end
+
+  defp parse_list(%{command_list: [9, adjustment | rest]} = state) do
+    adjust_value = value_lookup(state, adjustment, state.argument_flags.param_1_mode)
+
+    {:noreply, %{state | command_list: rest, relative_base: state.relative_base + adjust_value}, 0}
   end
 
   defp parse_list(%{command_list: [99 | _], result_pid: result_pid} = state) when is_pid(result_pid) do
@@ -259,11 +265,15 @@ defmodule IntOpEngine do
     {updated_map, rest_list, state.current_index}
   end
 
-  defp value_lookup(map, key, 0) do
-    Map.get(map, key)
+  defp value_lookup(%State{lookup_map: lookup_map}, key, 0) do
+    Map.get(lookup_map, key, 0)
   end
 
   defp value_lookup(_, key, 1) do
     key
+  end
+
+  defp value_lookup(%State{lookup_map: lookup_map, relative_base: relative_base}, key, 2) do
+    Map.get(lookup_map, relative_base + key, 0)
   end
 end
