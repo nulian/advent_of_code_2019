@@ -16,7 +16,7 @@ defmodule IntOpEngine do
               argument_flags: nil,
               input_request: false,
               input_list: [],
-              last_output: nil,
+              last_output: [],
               output_pid: nil,
               result_pid: nil,
               relative_base: 0
@@ -38,7 +38,16 @@ defmodule IntOpEngine do
   end
 
   def start_link({:command_list, list}, arguments) do
-    GenServer.start_link(__MODULE__, Enum.into([{:command_list, list} | arguments], %{}))
+    {name, arguments} = Keyword.pop(arguments, :name)
+
+    options =
+      if name do
+        [name: name]
+      else
+        []
+      end
+
+    GenServer.start_link(__MODULE__, Enum.into([{:command_list, list} | arguments], %{}), options)
   end
 
   @impl true
@@ -51,6 +60,22 @@ defmodule IntOpEngine do
     lookup_map = Enum.into(Enum.with_index(command_list), %{}, fn {value, int} -> {int, value} end)
 
     {:noreply, %State{state | lookup_map: lookup_map}}
+  end
+
+  @impl true
+  def handle_info(:timeout, %State{last_output: [t, x, y | rest]} = state) do
+    #    Logger.error(t)
+
+    pid =
+      if t == 255 do
+        GenServer.whereis(:nat)
+      else
+        GenServer.whereis(String.to_atom("cpu#{t}"))
+      end
+
+    GenServer.cast(pid, {:set_input, x})
+    GenServer.cast(pid, {:set_input, y})
+    {:noreply, %State{state | last_output: rest}, 0}
   end
 
   @impl true
@@ -76,13 +101,13 @@ defmodule IntOpEngine do
   def handle_cast({:set_input, input}, %{command_list: [3, address | rest], input_request: true} = state) do
     state = %{state | current_index: state.current_index + 2}
 
-    {updated_map, rest, new_index} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
+    {updated_map, rest} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
 
     updated_state = %{
       state
       | command_list: rest,
         lookup_map: updated_map,
-        current_index: new_index,
+        current_index: state.current_index,
         input_request: false
     }
 
@@ -91,7 +116,7 @@ defmodule IntOpEngine do
 
   @impl true
   def handle_cast({:set_input, input}, state) do
-    Logger.info("received input #{inspect(self())} #{input}")
+    #    Logger.info("received input #{inspect(self())} #{input}")
     {:noreply, %{state | input_list: state.input_list ++ [input]}, 0}
   end
 
@@ -101,9 +126,9 @@ defmodule IntOpEngine do
 
     state = %{state | current_index: state.current_index + 4}
 
-    {updated_map, rest, new_index} = update_value(state, rest, value, val_a + val_b, state.argument_flags.param_3_mode)
+    {updated_map, rest} = update_value(state, rest, value, val_a + val_b, state.argument_flags.param_3_mode)
 
-    {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
+    {:noreply, %{state | command_list: rest, lookup_map: updated_map}, 0}
   end
 
   defp parse_list(%{command_list: [2, a, b, value | rest]} = state) do
@@ -112,23 +137,20 @@ defmodule IntOpEngine do
 
     state = %{state | current_index: state.current_index + 4}
 
-    {updated_map, rest, new_index} = update_value(state, rest, value, val_a * val_b, state.argument_flags.param_3_mode)
+    {updated_map, rest} = update_value(state, rest, value, val_a * val_b, state.argument_flags.param_3_mode)
 
-    {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
+    {:noreply, %{state | command_list: rest, lookup_map: updated_map}, 0}
   end
 
   defp parse_list(%{command_list: [3, address | rest], input_list: [input | remaining_input]} = state) do
-    Logger.info("used preset input")
-
     state = %{state | current_index: state.current_index + 2}
 
-    {updated_map, rest, new_index} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
+    {updated_map, rest} = update_value(state, rest, address, input, state.argument_flags.param_1_mode)
 
     updated_state = %{
       state
       | command_list: rest,
         lookup_map: updated_map,
-        current_index: new_index,
         input_list: remaining_input
     }
 
@@ -136,22 +158,30 @@ defmodule IntOpEngine do
   end
 
   defp parse_list(%{command_list: [3, _address | _rest]} = state) do
-    Logger.info("Waiting for input:")
-    {:noreply, %{state | input_request: true}, :hibernate}
+    {:noreply, %{state | input_list: state.input_list ++ [-1]}, 500}
   end
+
+  #  defp parse_list(%{command_list: [3, _address | _rest]} = state) do
+  #    Logger.info("Waiting for input:")
+  #
+  #    {:noreply, %{state | input_request: true}, :hibernate}
+  #  end
 
   # Puts
   defp parse_list(%{command_list: [4, address | rest], output_pid: output_pid} = state) when is_pid(output_pid) do
     value = value_lookup(state, address, state.argument_flags.param_1_mode)
-    Logger.info(value)
+    #    Logger.info(value)
     GenServer.cast(output_pid, {:set_input, value})
     {:noreply, %{state | command_list: rest, last_output: value, current_index: state.current_index + 2}, 0}
   end
 
   defp parse_list(%{command_list: [4, address | rest]} = state) do
     value = value_lookup(state, address, state.argument_flags.param_1_mode)
-    Logger.info(value)
-    {:noreply, %{state | command_list: rest, last_output: value, current_index: state.current_index + 2}, 0}
+    #    Logger.info(value)
+
+    {:noreply,
+     %{state | command_list: rest, last_output: state.last_output ++ [value], current_index: state.current_index + 2},
+     0}
   end
 
   defp parse_list(%{command_list: [key, x, value | rest]} = state) when key in [5, 6] do
@@ -186,16 +216,21 @@ defmodule IntOpEngine do
 
     state = %{state | current_index: state.current_index + 4}
 
-    {updated_map, rest, new_index} =
-      update_value(state, rest, set_value, comparison_value, state.argument_flags.param_3_mode)
+    {updated_map, rest} = update_value(state, rest, set_value, comparison_value, state.argument_flags.param_3_mode)
 
-    {:noreply, %{state | command_list: rest, lookup_map: updated_map, current_index: new_index}, 0}
+    {:noreply, %{state | command_list: rest, lookup_map: updated_map}, 0}
   end
 
   defp parse_list(%{command_list: [9, adjustment | rest]} = state) do
     adjust_value = value_lookup(state, adjustment, state.argument_flags.param_1_mode)
 
-    {:noreply, %{state | command_list: rest, relative_base: state.relative_base + adjust_value}, 0}
+    {:noreply,
+     %{
+       state
+       | command_list: rest,
+         relative_base: state.relative_base + adjust_value,
+         current_index: state.current_index + 2
+     }, 0}
   end
 
   defp parse_list(%{command_list: [99 | _], result_pid: result_pid} = state) when is_pid(result_pid) do
@@ -247,7 +282,7 @@ defmodule IntOpEngine do
         rest_list
       end
 
-    {updated_map, rest_list, state.current_index}
+    {updated_map, rest_list}
   end
 
   defp update_value(%State{} = state, rest_list, relative_key_value, value, 2) do
@@ -262,7 +297,7 @@ defmodule IntOpEngine do
         rest_list
       end
 
-    {updated_map, rest_list, state.current_index}
+    {updated_map, rest_list}
   end
 
   defp value_lookup(%State{lookup_map: lookup_map}, key, 0) do
